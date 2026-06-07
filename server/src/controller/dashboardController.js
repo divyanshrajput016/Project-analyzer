@@ -17,13 +17,27 @@ async function getDashboard(req,res) {
         const totalModelsDetected = projects.reduce((sum,item) => sum + (item.totalModels || 0),0)
         const securityScores = projects.map(item => item.securityScore || 0)
         const averageSecurityScore = securityScores.length ? Math.round(securityScores.reduce((sum,item) => sum + item,0) / securityScores.length) : 0
+        const authenticationTypes = {}
+        const languageBreakdown = {}
 
         const techStackStatistics = {}
         projects.forEach(project => {
             ;(project.techStack || []).forEach(tech => {
                 techStackStatistics[tech] = (techStackStatistics[tech] || 0) + 1
             })
+            if(project.techStack.includes("JWT")) {
+                authenticationTypes.JWT = (authenticationTypes.JWT || 0) + 1
+            }
+            if(project.language) {
+                languageBreakdown[project.language] = (languageBreakdown[project.language] || 0) + 1
+            }
         })
+
+        const securityTrend = projects.sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt)).map(project => ({
+            name : project.name,
+            score : project.securityScore || 0,
+            date : project.createdAt
+        }))
 
         res.status(200).json({
             stats : {
@@ -31,13 +45,23 @@ async function getDashboard(req,res) {
                 totalApisDetected,
                 totalModelsDetected,
                 totalProjectsAnalyzed : totalProjects,
-                averageSecurityScore
+                averageSecurityScore,
+                authenticationType : Object.keys(authenticationTypes)[0] || "Mixed"
             },
             recentReports,
             savedReports,
             chatHistory,
             securityScores,
-            techStackStatistics
+            techStackStatistics,
+            authenticationTypes,
+            languageBreakdown,
+            securityTrend,
+            repositoryStatistics : projects.map(project => ({
+                name : project.name,
+                apis : project.totalApis,
+                models : project.totalModels,
+                security : project.securityScore
+            }))
         })
     } catch (error) {
         console.error(error);
@@ -48,4 +72,3 @@ async function getDashboard(req,res) {
 module.exports = {
     getDashboard
 }
-

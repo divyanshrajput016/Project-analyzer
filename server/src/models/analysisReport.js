@@ -19,7 +19,12 @@ const analysisReportSchema = new mongoose.Schema({
     repositoryUrl : String,
     summary : String,
     overview : String,
+    languageBreakdown : [mongoose.Schema.Types.Mixed],
     folderStructure : mongoose.Schema.Types.Mixed,
+    controllers : [mongoose.Schema.Types.Mixed],
+    middleware : [mongoose.Schema.Types.Mixed],
+    services : [mongoose.Schema.Types.Mixed],
+    dependencyGraph : mongoose.Schema.Types.Mixed,
     techStack : [String],
     authentication : mongoose.Schema.Types.Mixed,
     database : mongoose.Schema.Types.Mixed,
@@ -28,6 +33,8 @@ const analysisReportSchema = new mongoose.Schema({
     architecture : mongoose.Schema.Types.Mixed,
     readme : String,
     interviewQuestions : mongoose.Schema.Types.Mixed,
+    projectExplanations : mongoose.Schema.Types.Mixed,
+    qualitySignals : mongoose.Schema.Types.Mixed,
     markdown : String,
     status : {
         type : String,
@@ -37,4 +44,3 @@ const analysisReportSchema = new mongoose.Schema({
 },{timestamps : true})
 
 module.exports = mongoose.model("AnalysisReport",analysisReportSchema)
-

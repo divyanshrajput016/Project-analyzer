@@ -77,10 +77,55 @@ async function exportMarkdown(req,res) {
     res.send(report.markdown || report.readme || "# CodeAtlas Report")
 }
 
+async function exportReadme(req,res) {
+    const report = await reportModel.findOne({_id : req.params.id,user : req.user.id})
+
+    if(!report) {
+        return res.status(404).json({
+            message : "Report not found"
+        })
+    }
+
+    res.setHeader("Content-Type","text/markdown")
+    res.setHeader("Content-Disposition",`attachment; filename="README-${report.title || "codeatlas"}.md"`)
+    res.send(report.readme || report.markdown || "# README")
+}
+
+async function exportDiagram(req,res) {
+    const report = await reportModel.findOne({_id : req.params.id,user : req.user.id})
+
+    if(!report) {
+        return res.status(404).json({
+            message : "Report not found"
+        })
+    }
+
+    const diagram = report.architecture?.systemDiagram || "graph TD\nApp[Application]"
+    res.setHeader("Content-Type","text/plain")
+    res.setHeader("Content-Disposition",`attachment; filename="${report.title || "architecture"}-diagram.mmd"`)
+    res.send(diagram)
+}
+
+async function exportPdf(req,res) {
+    const report = await reportModel.findOne({_id : req.params.id,user : req.user.id})
+
+    if(!report) {
+        return res.status(404).json({
+            message : "Report not found"
+        })
+    }
+
+    res.setHeader("Content-Type","text/plain")
+    res.setHeader("Content-Disposition",`attachment; filename="${report.title || "codeatlas-report"}.pdf.txt"`)
+    res.send(report.markdown || report.readme || "# CodeAtlas Report")
+}
+
 module.exports = {
     getAllReports,
     getReportById,
     deleteReport,
-    exportMarkdown
+    exportMarkdown,
+    exportReadme,
+    exportDiagram,
+    exportPdf
 }
-

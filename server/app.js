@@ -10,6 +10,7 @@ const reportRoutes = require("./src/routes/reportRoutes")
 const adminRoutes = require("./src/routes/adminRoutes")
 const projectRoutes = require("./src/routes/projectRoutes")
 const chatRoutes = require("./src/routes/chatRoutes")
+const interviewRoutes = require("./src/routes/interviewRoutes")
 
 const app = express();
 
@@ -33,5 +34,6 @@ app.use("/api/reports",reportRoutes)
 app.use("/api/admin",adminRoutes)
 app.use("/api/projects",projectRoutes)
 app.use("/api/chat",chatRoutes)
+app.use("/api/interview",interviewRoutes)
 
 module.exports = app

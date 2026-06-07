@@ -35,6 +35,7 @@ async function saveAnalysis(req,res,sourceType,repositoryUrl,workDir,name) {
                 sourceType,
                 repositoryUrl,
                 description : finalReport.summary,
+                language : finalReport.languageBreakdown?.[0]?.language || "",
                 techStack : finalReport.techStack,
                 totalApis : finalReport.apis.length,
                 totalModels : finalReport.database.models.length + finalReport.database.prismaModels.length,
@@ -43,6 +44,7 @@ async function saveAnalysis(req,res,sourceType,repositoryUrl,workDir,name) {
             })
         } else {
             project.latestVersion += 1
+            project.language = finalReport.languageBreakdown?.[0]?.language || project.language
             project.techStack = finalReport.techStack
             project.totalApis = finalReport.apis.length
             project.totalModels = finalReport.database.models.length + finalReport.database.prismaModels.length
@@ -149,4 +151,3 @@ module.exports = {
     getProjects,
     compareVersions
 }
-
