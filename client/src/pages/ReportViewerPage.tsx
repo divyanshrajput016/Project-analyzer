@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Download, FileText, ShieldAlert } from "lucide-react";
+import { Download, FileText, GitCompare, ShieldAlert, Sparkles } from "lucide-react";
 import { api } from "../services/api";
 import { apiUrl } from "../lib/utils";
 import type { Report } from "../types";
@@ -12,15 +12,21 @@ import { MermaidDiagram } from "../components/MermaidDiagram";
 import { MarkdownView } from "../components/MarkdownView";
 import { CopyButton } from "../components/CopyButton";
 
-const tabs = ["Overview", "Architecture", "APIs", "Database", "Authentication", "Security", "Interview Questions", "README"];
+const tabs = ["Overview", "Walkthrough", "Architecture", "APIs", "Database", "Authentication", "Security", "Quality", "Interview Questions", "Resume Kit", "README", "Compare"];
 
 export function ReportViewerPage() {
   const { id } = useParams();
   const [report, setReport] = useState<Report | null>(null);
+  const [comparison, setComparison] = useState<any>(null);
 
   useEffect(() => {
     api.get(`/reports/${id}`).then((res) => setReport(res.data.report));
   }, [id]);
+
+  useEffect(() => {
+    if (!report?.project) return;
+    api.get(`/projects/${report.project}/compare`).then((res) => setComparison(res.data.comparison)).catch(() => setComparison(null));
+  }, [report]);
 
   const securityTone = useMemo(() => {
     const score = report?.security?.score || 0;
@@ -44,6 +50,7 @@ export function ReportViewerPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="accent" onClick={() => document.getElementById("walkthrough")?.scrollIntoView({ behavior: "smooth" })}><Sparkles className="h-4 w-4" />Explain Entire Project</Button>
             <Button asChild variant="outline"><a href={apiUrl(`/reports/${report._id}/export/markdown`)}><Download className="h-4 w-4" />Markdown</a></Button>
             <Button asChild variant="outline"><a href={apiUrl(`/reports/${report._id}/export/readme`)}><FileText className="h-4 w-4" />README</a></Button>
             <Button asChild variant="outline"><a href={apiUrl(`/reports/${report._id}/export/diagram`)}>Diagram</a></Button>
@@ -83,6 +90,19 @@ export function ReportViewerPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="Walkthrough">
+          <Card id="walkthrough">
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle>{report.repositoryWalkthrough?.title || "Explain Entire Project"}</CardTitle>
+              <CopyButton value={report.repositoryWalkthrough?.explanation || ""} />
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-600 dark:text-zinc-300">{report.repositoryWalkthrough?.explanation}</p>
+              <EvidenceList title="Walkthrough Evidence" items={report.repositoryWalkthrough?.evidence || []} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="Architecture">
           <div className="grid gap-6">
             <LayerCards report={report} />
@@ -112,9 +132,12 @@ export function ReportViewerPage() {
                   <div key={`${model.name}-${model.file}`} className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
                     <p className="font-semibold">{model.name}</p>
                     <p className="mt-1 text-xs text-zinc-500">{model.file}</p>
+                    <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{model.purpose}</p>
+                    {!!model.keyFields?.length && <div className="mt-3 flex flex-wrap gap-2">{model.keyFields.map((field) => <Badge key={field} tone="cyan">{field}</Badge>)}</div>}
                     <div className="mt-3 space-y-1 font-mono text-sm text-zinc-600 dark:text-zinc-300">
                       {(model.fields || []).map((field) => <p key={field}>├ {field}</p>)}
                     </div>
+                    <EvidenceList title="Source" items={model.source ? [model.source] : []} compact />
                   </div>
                 ))}
               </CardContent>
@@ -153,10 +176,31 @@ export function ReportViewerPage() {
                 <div key={`${route.method}-${route.path}`} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
                   <p className="font-mono text-sm"><span className="font-bold text-cyan-600">{route.method}</span> {route.path}</p>
                   <p className="mt-2 text-xs text-zinc-500">Middleware: {route.middleware.join(" -> ")}</p>
+                  <EvidenceList title="Source" items={route.source ? [route.source] : []} compact />
                 </div>
               ))}
             </CardContent>
           </Card>
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader><CardTitle>Public Routes</CardTitle></CardHeader>
+              <CardContent className="grid gap-3">
+                {(report.authentication.publicRoutes || []).map((route) => (
+                  <div key={`${route.method}-${route.path}`} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+                    <p className="font-mono text-sm"><span className="font-bold text-emerald-600">{route.method}</span> {route.path}</p>
+                    <EvidenceList title="Source" items={route.source ? [route.source] : []} compact />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Logout / Token Invalidation</CardTitle></CardHeader>
+              <CardContent>
+                <p className="text-sm leading-6 text-zinc-500 dark:text-zinc-400">{report.authentication.logoutFlow?.explanation}</p>
+                <EvidenceList title="Evidence" items={report.authentication.logoutFlow?.locations || []} />
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="Security">
@@ -180,9 +224,39 @@ export function ReportViewerPage() {
                       <p className="font-semibold">{issue.title}</p>
                     </div>
                     <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{issue.recommendation}</p>
+                    <EvidenceList title="Evidence" items={issue.evidence || []} compact />
                   </div>
                 ))}
                 {!(report.security.issues || []).length && <EmptyState text="No security issues detected." />}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="Quality">
+          <div className="grid gap-6 lg:grid-cols-[0.7fr_1.3fr]">
+            <Card>
+              <CardHeader><CardTitle>Code Quality Score</CardTitle></CardHeader>
+              <CardContent>
+                <Badge tone={(report.codeQuality?.score || 0) > 75 ? "green" : "amber"}>Maintainability</Badge>
+                <p className="mt-5 text-6xl font-bold">{report.codeQuality?.score || 0}</p>
+                <p className="mt-2 text-sm text-zinc-500">{report.codeQuality?.summary}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>Quality Findings</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {(report.codeQuality?.issues || []).map((issue) => (
+                  <div key={`${issue.title}-${issue.recommendation}`} className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+                    <div className="flex items-center gap-2">
+                      <Badge tone={severityTone(issue.severity)}>{issue.severity}</Badge>
+                      <p className="font-semibold">{issue.title}</p>
+                    </div>
+                    <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{issue.recommendation}</p>
+                    <EvidenceList title="Evidence" items={issue.evidence || []} compact />
+                  </div>
+                ))}
+                {!(report.codeQuality?.issues || []).length && <EmptyState text="No quality issues detected." />}
               </CardContent>
             </Card>
           </div>
@@ -209,6 +283,52 @@ export function ReportViewerPage() {
             </CardHeader>
             <CardContent>
               <MarkdownView content={report.readme || report.markdown} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="Resume Kit">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="flex-row items-center justify-between"><CardTitle>Resume Bullets</CardTitle><CopyButton value={(report.resumeKit?.resumeBullets || []).join("\n")} /></CardHeader>
+              <CardContent className="space-y-3">{(report.resumeKit?.resumeBullets || []).map((item) => <p key={item} className="rounded-md bg-zinc-50 p-3 text-sm dark:bg-zinc-900">{item}</p>)}</CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex-row items-center justify-between"><CardTitle>LinkedIn Description</CardTitle><CopyButton value={report.resumeKit?.linkedInDescription || ""} /></CardHeader>
+              <CardContent><p className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">{report.resumeKit?.linkedInDescription}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex-row items-center justify-between"><CardTitle>2-minute Interview Pitch</CardTitle><CopyButton value={report.resumeKit?.twoMinutePitch || ""} /></CardHeader>
+              <CardContent><p className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">{report.resumeKit?.twoMinutePitch}</p></CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex-row items-center justify-between"><CardTitle>GitHub README</CardTitle><CopyButton value={report.resumeKit?.githubReadme || report.readme || ""} /></CardHeader>
+              <CardContent><MarkdownView content={report.resumeKit?.githubReadme || report.readme || ""} /></CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="Compare">
+          <Card>
+            <CardHeader><CardTitle><GitCompare className="mr-2 inline h-5 w-5" />Version Compare</CardTitle></CardHeader>
+            <CardContent>
+              {!comparison && <EmptyState text="Analyze this repository again to compare versions." />}
+              {comparison && <div className="grid gap-4 md:grid-cols-2">
+                <CompareBlock title="New APIs" items={comparison.addedApis || []} />
+                <CompareBlock title="Removed APIs" items={comparison.removedApis || []} />
+                <CompareBlock title="Changed Models" items={comparison.changedModels || []} />
+                <CompareBlock title="Removed Models" items={comparison.removedModels || []} />
+                <CompareBlock title="Added Dependencies" items={comparison.changedDependencies?.added || []} />
+                <CompareBlock title="Removed Dependencies" items={comparison.changedDependencies?.removed || []} />
+                <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+                  <p className="font-semibold">Security Score</p>
+                  <p className="mt-2 text-sm text-zinc-500">{comparison.changedSecurityScore?.previous} {"->"} {comparison.changedSecurityScore?.current} ({comparison.changedSecurityScore?.delta >= 0 ? "+" : ""}{comparison.changedSecurityScore?.delta})</p>
+                </div>
+                <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+                  <p className="font-semibold">Architecture Changed</p>
+                  <p className="mt-2 text-sm text-zinc-500">{comparison.changedArchitecture ? "Yes" : "No"}</p>
+                </div>
+              </div>}
             </CardContent>
           </Card>
         </TabsContent>
@@ -269,6 +389,24 @@ function ApiCard({ apiItem }: { apiItem: Report["apis"][number] }) {
             <pre className="mt-2 overflow-auto text-xs">{payload}</pre>
           </div>
         </div>
+        {apiItem.flowTrace && (
+          <div className="mt-4 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+            <p className="text-sm font-semibold">Route Flow Trace</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {apiItem.flowTrace.steps.map((step, index) => (
+                <span key={`${step}-${index}`} className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium dark:bg-zinc-900">{step}</span>
+              ))}
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <EvidenceList title="Route" items={[apiItem.flowTrace.route]} compact />
+              <EvidenceList title="Controller" items={apiItem.flowTrace.controller.source ? [apiItem.flowTrace.controller.source] : []} compact />
+              <EvidenceList title="Middleware" items={apiItem.flowTrace.middleware.map((item) => item.source).filter(Boolean) as any} compact />
+              <EvidenceList title="Service / Helper" items={apiItem.flowTrace.services.map((item) => item.source)} compact />
+              <EvidenceList title="Database / Model" items={apiItem.flowTrace.models.map((item) => item.source)} compact />
+              <EvidenceList title="External API" items={apiItem.flowTrace.externalApis.map((item) => item.source)} compact />
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -279,7 +417,36 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
 }
 
 function LocationList({ title, items }: { title: string; items: Array<{ file: string; line: number; code: string }> }) {
-  return <div><p className="text-sm font-semibold">{title}</p><div className="mt-2 space-y-2">{items.length === 0 && <p className="text-xs text-zinc-500">Not detected</p>}{items.map((item) => <p key={`${item.file}-${item.line}`} className="rounded-md bg-zinc-50 p-2 font-mono text-xs dark:bg-zinc-900">{item.file}:{item.line}</p>)}</div></div>;
+  return <EvidenceList title={title} items={items} compact />;
+}
+
+function EvidenceList({ title, items, compact = false }: { title: string; items: Array<{ file: string; line: number; code?: string }>; compact?: boolean }) {
+  return (
+    <div className={compact ? "mt-3" : ""}>
+      <p className="text-sm font-semibold">{title}</p>
+      <div className="mt-2 space-y-2">
+        {items.length === 0 && <p className="text-xs text-zinc-500">No source evidence detected.</p>}
+        {items.map((item) => (
+          <div key={`${item.file}-${item.line}-${item.code}`} className="rounded-md bg-zinc-50 p-2 dark:bg-zinc-900">
+            <p className="font-mono text-xs text-cyan-700 dark:text-cyan-300">{item.file}:{item.line}</p>
+            {item.code && !compact && <p className="mt-1 break-words font-mono text-xs text-zinc-500">{item.code}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CompareBlock({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+      <p className="font-semibold">{title}</p>
+      <div className="mt-3 space-y-2">
+        {items.length === 0 && <p className="text-sm text-zinc-500">No changes</p>}
+        {items.map((item) => <p key={item} className="rounded bg-zinc-50 px-2 py-1 text-sm dark:bg-zinc-900">{item}</p>)}
+      </div>
+    </div>
+  );
 }
 
 function EmptyState({ text }: { text: string }) {
@@ -295,4 +462,3 @@ function severityTone(severity: string) {
   if (severity === "Medium") return "amber";
   return "default";
 }
-
