@@ -5,6 +5,9 @@ const cors = require("cors")
 const connectDB = require("./src/config/db")
 
 const authRoutes = require("./src/routes/authRoutes")
+const dashboardRoutes = require("./src/routes/dashboardRoutes")
+const reportRoutes = require("./src/routes/reportRoutes")
+const adminRoutes = require("./src/routes/adminRoutes")
 
 const app = express();
 
@@ -23,6 +26,8 @@ app.get("/api/health",(req,res) => {
 })
 
 app.use("/api/auth",authRoutes)
+app.use("/api/dashboard",dashboardRoutes)
+app.use("/api/reports",reportRoutes)
+app.use("/api/admin",adminRoutes)
 
 module.exports = app
-
