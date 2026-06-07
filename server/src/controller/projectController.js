@@ -132,6 +132,18 @@ async function compareVersions(req,res) {
     const newApis = new Set(current.apis.map(api => `${api.method} ${api.path}`))
     const oldModels = new Set(previous.database.models.map(model => model.name))
     const newModels = new Set(current.database.models.map(model => model.name))
+    const oldDeps = new Set(previous.techStack || [])
+    const newDeps = new Set(current.techStack || [])
+    const oldModelFields = {}
+    const newModelFields = {}
+
+    previous.database.models.forEach(model => {
+        oldModelFields[model.name] = (model.fields || []).join("|")
+    })
+
+    current.database.models.forEach(model => {
+        newModelFields[model.name] = (model.fields || []).join("|")
+    })
 
     res.status(200).json({
         comparison : {
@@ -139,8 +151,18 @@ async function compareVersions(req,res) {
             toVersion : current.version,
             addedApis : [...newApis].filter(api => !oldApis.has(api)),
             removedApis : [...oldApis].filter(api => !newApis.has(api)),
-            changedModels : [...newModels].filter(model => !oldModels.has(model)),
-            changedArchitecture : previous.architecture.summary !== current.architecture.summary
+            changedModels : [...newModels].filter(model => !oldModels.has(model) || oldModelFields[model] !== newModelFields[model]),
+            removedModels : [...oldModels].filter(model => !newModels.has(model)),
+            changedDependencies : {
+                added : [...newDeps].filter(dep => !oldDeps.has(dep)),
+                removed : [...oldDeps].filter(dep => !newDeps.has(dep))
+            },
+            changedSecurityScore : {
+                previous : previous.security?.score || 0,
+                current : current.security?.score || 0,
+                delta : (current.security?.score || 0) - (previous.security?.score || 0)
+            },
+            changedArchitecture : previous.architecture.summary !== current.architecture.summary || previous.architecture.systemDiagram !== current.architecture.systemDiagram
         }
     })
 }

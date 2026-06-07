@@ -25,6 +25,7 @@ const analysisReportSchema = new mongoose.Schema({
     middleware : [mongoose.Schema.Types.Mixed],
     services : [mongoose.Schema.Types.Mixed],
     dependencyGraph : mongoose.Schema.Types.Mixed,
+    codeQuality : mongoose.Schema.Types.Mixed,
     techStack : [String],
     authentication : mongoose.Schema.Types.Mixed,
     database : mongoose.Schema.Types.Mixed,
@@ -34,6 +35,8 @@ const analysisReportSchema = new mongoose.Schema({
     readme : String,
     interviewQuestions : mongoose.Schema.Types.Mixed,
     projectExplanations : mongoose.Schema.Types.Mixed,
+    repositoryWalkthrough : mongoose.Schema.Types.Mixed,
+    resumeKit : mongoose.Schema.Types.Mixed,
     qualitySignals : mongoose.Schema.Types.Mixed,
     markdown : String,
     status : {

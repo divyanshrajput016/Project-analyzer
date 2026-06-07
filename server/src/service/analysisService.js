@@ -16,6 +16,63 @@ const languageByExtension = {
     ".html" : "HTML"
 }
 
+function createSourceRef(file,line,code) {
+    return {
+        file : file.path || file,
+        line : line || 1,
+        code : (code || "").trim().slice(0,180)
+    }
+}
+
+function findLine(file,pattern) {
+    const lines = file.content.split("\n")
+    const index = lines.findIndex(line => {
+        if(pattern instanceof RegExp) return pattern.test(line)
+        return line.includes(pattern)
+    })
+
+    return {
+        line : index >= 0 ? index + 1 : 1,
+        code : index >= 0 ? lines[index] : ""
+    }
+}
+
+function getFunctionName(handler) {
+    return (handler || "").split(".").pop().replace(/[^\w]/g,"")
+}
+
+function findFunctionFile(files,name) {
+    if(!name) return null
+    return files.find(file => file.content.includes(`function ${name}`) || file.content.includes(`${name} =`) || file.content.includes(`${name}:`))
+}
+
+function getPackageData(files) {
+    const packageFile = files.find(file => file.path.endsWith("package.json"))
+
+    if(!packageFile) {
+        return {
+            dependencies : {},
+            devDependencies : {},
+            source : null
+        }
+    }
+
+    try {
+        const pkg = JSON.parse(packageFile.content)
+        return {
+            dependencies : pkg.dependencies || {},
+            devDependencies : pkg.devDependencies || {},
+            source : createSourceRef(packageFile,1,"package.json")
+        }
+    } catch (error) {
+        return {
+            dependencies : {},
+            devDependencies : {},
+            source : createSourceRef(packageFile,1,"Invalid package.json")
+        }
+    }
+}
+
 function detectTechStack(files) {
     const stack = new Set()
     const packageFile = files.find(file => file.path.endsWith("package.json"))
@@ -113,6 +170,7 @@ function detectControllers(files) {
         controllers.push({
             file : file.path,
             functions,
+            source : createSourceRef(file,1,path.basename(file.path)),
             responsibilities : inferResponsibilities(file.content)
         })
     })
@@ -134,6 +192,7 @@ function detectMiddleware(files) {
     return files.filter(file => file.path.toLowerCase().includes("middleware")).map(file => ({
         file : file.path,
         name : path.basename(file.path,path.extname(file.path)),
+        source : createSourceRef(file,1,path.basename(file.path)),
         checks : [
             file.content.includes("jwt.verify") ? "JWT verification" : "",
             file.content.includes("req.cookies") ? "Cookie token lookup" : "",
@@ -154,6 +213,7 @@ function detectServices(files) {
         return {
             file : file.path,
             name : path.basename(file.path,path.extname(file.path)),
+            source : createSourceRef(file,1,path.basename(file.path)),
             externalCalls : calls
         }
     })
@@ -170,6 +230,10 @@ function detectApis(files) {
             const chain = match[4].split(",").map(item => item.trim()).filter(Boolean)
             const handler = chain[chain.length - 1] || "inlineHandler"
             const middleware = chain.slice(0,-1)
+            const routeLocation = findLine(file,match[3])
+            const functionName = getFunctionName(handler)
+            const controllerFile = findFunctionFile(files,functionName)
+            const controllerLocation = controllerFile ? findLine(controllerFile,functionName) : null
 
             apis.push({
                 file : file.path,
@@ -180,12 +244,104 @@ function detectApis(files) {
                 middleware,
                 request : inferRequestPayload(files,handler),
                 response : inferResponsePayload(files,handler),
-                citations : [file.path]
+                source : createSourceRef(file,routeLocation.line,routeLocation.code),
+                citations : [
+                    createSourceRef(file,routeLocation.line,routeLocation.code)
+                ].concat(controllerFile ? [createSourceRef(controllerFile,controllerLocation.line,controllerLocation.code)] : []),
+                flowTrace : traceRouteFlow(files,file,handler,middleware,match[2].toUpperCase(),match[3])
             })
         }
     })
 
     return apis
+}
+
+function traceRouteFlow(files,routeFile,handler,middleware,method,routePath) {
+    const functionName = getFunctionName(handler)
+    const routeLocation = findLine(routeFile,routePath)
+    const controllerFile = findFunctionFile(files,functionName)
+    const controllerLocation = controllerFile ? findLine(controllerFile,functionName) : null
+    const services = controllerFile ? findServiceCalls(files,controllerFile) : []
+    const models = controllerFile ? findModelCalls(files,controllerFile) : []
+    const externalApis = controllerFile ? findExternalCalls(files,controllerFile,services) : []
+
+    return {
+        label : `${method} ${routePath}`,
+        route : createSourceRef(routeFile,routeLocation.line,routeLocation.code),
+        middleware : middleware.map(item => ({
+            name : item,
+            source : findNamedSource(files,item)
+        })),
+        controller : {
+            name : handler,
+            source : controllerFile ? createSourceRef(controllerFile,controllerLocation.line,controllerLocation.code) : null
+        },
+        services,
+        models,
+        externalApis,
+        steps : [
+            `Route ${method} ${routePath}`,
+            ...middleware.map(item => `Middleware ${item}`),
+            `Controller ${handler}`,
+            ...services.map(item => `Service/helper ${item.name}`),
+            ...models.map(item => `Database/model ${item.name}`),
+            ...externalApis.map(item => `External API ${item.name}`)
+        ]
+    }
+}
+
+function findNamedSource(files,name) {
+    const clean = getFunctionName(name) || name
+    const file = files.find(item => item.content.includes(clean) || item.path.toLowerCase().includes(clean.toLowerCase()))
+    if(!file) return null
+    const location = findLine(file,clean)
+    return createSourceRef(file,location.line,location.code)
+}
+
+function findServiceCalls(files,controllerFile) {
+    const services = files.filter(file => file.path.toLowerCase().includes("service") || file.path.toLowerCase().includes("helper"))
+
+    return services.filter(service => {
+        const name = path.basename(service.path,path.extname(service.path))
+        return controllerFile.content.includes(name) || controllerFile.content.includes(`../service`) || controllerFile.content.includes(`../helper`)
+    }).map(service => ({
+        name : path.basename(service.path,path.extname(service.path)),
+        source : createSourceRef(service,1,path.basename(service.path))
+    }))
+}
+
+function findModelCalls(files,controllerFile) {
+    const models = files.filter(file => file.path.toLowerCase().includes("model") || file.content.includes("mongoose.model"))
+
+    return models.filter(model => {
+        const name = path.basename(model.path,path.extname(model.path))
+        return controllerFile.content.includes(name) || controllerFile.content.includes("Model") || controllerFile.content.includes("../models")
+    }).map(model => ({
+        name : path.basename(model.path,path.extname(model.path)),
+        source : createSourceRef(model,1,path.basename(model.path))
+    }))
+}
+
+function findExternalCalls(files,controllerFile,services) {
+    const sourceFiles = [controllerFile].concat(services.map(service => files.find(file => file.path === service.source.file)).filter(Boolean))
+    const calls = []
+
+    sourceFiles.forEach(file => {
+        if(file.content.includes("generateContent") || file.content.includes("GoogleGenAI")) {
+            const location = findLine(file,/generateContent|GoogleGenAI/)
+            calls.push({name : "Gemini API", source : createSourceRef(file,location.line,location.code)})
+        }
+        if(file.content.includes("axios.") || file.content.includes("fetch(")) {
+            const location = findLine(file,/axios\.|fetch\(/)
+            calls.push({name : "HTTP API", source : createSourceRef(file,location.line,location.code)})
+        }
+        if(file.content.includes("simpleGit")) {
+            const location = findLine(file,"simpleGit")
+            calls.push({name : "Git provider", source : createSourceRef(file,location.line,location.code)})
+        }
+    })
+
+    return calls
 }
 
 function createApiDescription(method,route,handler) {
@@ -240,7 +396,10 @@ function detectDatabase(files) {
                 file : file.path,
                 type : "Mongoose Model",
                 name,
-                fields
+                fields,
+                keyFields : fields.filter(field => ["email","password","role","user","project","token","repositoryUrl","securityScore","createdAt"].includes(field)),
+                purpose : inferModelPurpose(name,fields),
+                source : createSourceRef(file,1,path.basename(file.path))
             })
 
             extractRelationships(file.content,name,file.path).forEach(item => relationships.push(item))
@@ -253,7 +412,10 @@ function detectDatabase(files) {
                 file : file.path,
                 type : "Prisma Model",
                 name : match[1],
-                fields : match[2].split("\n").map(line => line.trim().split(" ")[0]).filter(Boolean)
+                fields : match[2].split("\n").map(line => line.trim().split(" ")[0]).filter(Boolean),
+                keyFields : match[2].split("\n").map(line => line.trim().split(" ")[0]).filter(Boolean).slice(0,6),
+                purpose : inferModelPurpose(match[1],match[2].split("\n").map(line => line.trim().split(" ")[0]).filter(Boolean)),
+                source : createSourceRef(file,findLine(file,`model ${match[1]}`).line,`model ${match[1]}`)
             })
         }
     })
@@ -262,8 +424,19 @@ function detectDatabase(files) {
         models,
         prismaModels,
         relationships,
+        relationshipSummary : relationships.map(item => `${item.from} has many ${item.to} records through ${item.field}`),
         explanation : "Detected database entities from Mongoose schemas, Prisma models, and ObjectId references."
     }
+}
+
+function inferModelPurpose(name,fields) {
+    const lower = name.toLowerCase()
+    if(lower.includes("user")) return "Stores account identity, credentials, role, and ownership metadata."
+    if(lower.includes("report")) return "Stores generated repository intelligence reports and versioned analysis output."
+    if(lower.includes("project")) return "Stores repository metadata, stack summary, and latest analysis metrics."
+    if(lower.includes("chat")) return "Stores repository chat questions and grounded answers."
+    if(lower.includes("blacklist")) return "Stores invalidated tokens for logout/session revocation."
+    return `Stores ${fields.slice(0,4).join(", ") || "domain"} data for this repository.`
 }
 
 function extractSchemaFields(content) {
@@ -285,9 +458,10 @@ function extractRelationships(content,modelName,file) {
 
     while((match = relationRegex.exec(content)) !== null) {
         relationships.push({
-            from : modelName,
-            to : match[2],
+            from : match[2],
+            to : modelName,
             field : match[1],
+            type : "one-to-many reference",
             file
         })
     }
@@ -305,6 +479,8 @@ function analyzeAuthentication(files,apis) {
     const jwtVerification = findLocations(files,["jwt.verify"])
     const cookieSettings = findLocations(files,["res.cookie","sameSite","httpOnly","secure"])
     const protectedRoutes = apis.filter(api => api.middleware.some(item => item.toLowerCase().includes("auth")))
+    const publicRoutes = apis.filter(api => !api.middleware.some(item => item.toLowerCase().includes("auth")))
+    const logoutLocations = findLocations(files,["logout","blacklist","clearCookie"])
 
     return {
         type : usesJwt ? "JWT" : usesSession ? "Session" : usesOAuth ? "OAuth" : "Not detected",
@@ -321,8 +497,17 @@ function analyzeAuthentication(files,apis) {
             method : api.method,
             path : api.path,
             middleware : api.middleware,
-            source : api.file
+            source : api.source
         })),
+        publicRoutes : publicRoutes.map(api => ({
+            method : api.method,
+            path : api.path,
+            source : api.source
+        })),
+        logoutFlow : {
+            explanation : logoutLocations.length ? "Logout/token invalidation is implemented by clearing the cookie and/or storing the token in a blacklist." : "No explicit logout/token invalidation flow was detected.",
+            locations : logoutLocations
+        },
         loginFlow : usesJwt ? "Login validates credentials, signs a JWT, stores it in an HTTP-only cookie, and returns user metadata." : "No clear JWT login flow was detected.",
         registrationFlow : "Registration creates a user, hashes the password, and can start a session by issuing a token.",
         authorizationFlow : "Protected routes call middleware before controller execution. Middleware verifies the cookie token and attaches the decoded user to the request.",
@@ -353,18 +538,19 @@ function analyzeSecurity(files,auth) {
     const text = files.map(file => file.content).join("\n")
     const issues = []
 
-    addSecurityIssue(issues,!text.includes("helmet"),"Medium","Helmet middleware is not detected","Add helmet to configure secure HTTP headers.")
-    addSecurityIssue(issues,!text.toLowerCase().includes("ratelimit") && !text.includes("express-rate-limit"),"High","Rate limiting is not detected","Add rate limiting to auth, upload, and AI analysis routes.")
-    addSecurityIssue(issues,auth.detected.jwt && !text.includes("expiresIn"),"High","JWT expiry is not detected","Sign JWTs with a short expiry and refresh intentionally.")
-    addSecurityIssue(issues,auth.detected.cookies && !text.includes("httpOnly"),"Critical","HTTP-only cookie flag is not detected","Set httpOnly on auth cookies to reduce token theft risk.")
-    addSecurityIssue(issues,auth.detected.cookies && !text.includes("sameSite"),"Medium","SameSite cookie flag is not detected","Set sameSite to lax or strict for auth cookies.")
-    addSecurityIssue(issues,auth.detected.cookies && !text.includes("secure"),"Medium","Secure cookie flag is not detected","Set secure cookies in production.")
-    addSecurityIssue(issues,!text.includes("bcrypt"),"Critical","Password hashing is not detected","Hash passwords with bcrypt before saving users.")
-    addSecurityIssue(issues,!text.toLowerCase().includes("validate") && !text.includes("zod") && !text.includes("joi"),"Medium","Input validation is limited or missing","Validate request payloads before controller logic.")
-    addSecurityIssue(issues,text.includes("multer") && !text.includes("limits"),"High","Upload size limits are not detected","Set strict file size limits for uploads.")
-    addSecurityIssue(issues,text.includes("multer") && !text.includes("fileFilter"),"Medium","Upload MIME/type filtering is not detected","Filter uploads so only repository ZIP files are accepted.")
-    addSecurityIssue(issues,text.includes("cors(") && text.includes("*"),"High","CORS may allow every origin","Restrict CORS origins to trusted frontend domains.")
-    addSecurityIssue(issues,text.includes("eval("),"Critical","Dangerous eval usage detected","Remove eval and use safe parsers or explicit execution boundaries.")
+    addSecurityIssue(issues,!text.includes("helmet"),"Medium","Helmet middleware is not detected","Add helmet to configure secure HTTP headers.",[])
+    addSecurityIssue(issues,!text.toLowerCase().includes("ratelimit") && !text.includes("express-rate-limit"),"High","Rate limiting is not detected","Add rate limiting to auth, upload, and AI analysis routes.",[])
+    addSecurityIssue(issues,auth.detected.jwt && !text.includes("expiresIn"),"High","JWT expiry is not detected","Sign JWTs with a short expiry and refresh intentionally.",auth.jwtGeneration)
+    addSecurityIssue(issues,auth.detected.cookies && !text.includes("httpOnly"),"Critical","HTTP-only cookie flag is not detected","Set httpOnly on auth cookies to reduce token theft risk.",auth.cookieSettings)
+    addSecurityIssue(issues,auth.detected.cookies && !text.includes("sameSite"),"Medium","SameSite cookie flag is not detected","Set sameSite to lax or strict for auth cookies.",auth.cookieSettings)
+    addSecurityIssue(issues,auth.detected.cookies && !text.includes("secure"),"Medium","Secure cookie flag is not detected","Set secure cookies in production.",auth.cookieSettings)
+    addSecurityIssue(issues,!text.includes("bcrypt"),"Critical","Password hashing is not detected","Hash passwords with bcrypt before saving users.",[])
+    addSecurityIssue(issues,!text.toLowerCase().includes("validate") && !text.includes("zod") && !text.includes("joi"),"Medium","Input validation is limited or missing","Validate request payloads before controller logic.",findLocations(files,["req.body","req.query","req.params"]))
+    addSecurityIssue(issues,text.includes("multer") && !text.includes("limits"),"High","Upload size limits are not detected","Set strict file size limits for uploads.",findLocations(files,["multer"]))
+    addSecurityIssue(issues,text.includes("multer") && !text.includes("fileFilter"),"Medium","Upload MIME/type filtering is not detected","Filter uploads so only repository ZIP files are accepted.",findLocations(files,["multer"]))
+    addSecurityIssue(issues,text.includes("cors(") && text.includes("*"),"High","CORS may allow every origin","Restrict CORS origins to trusted frontend domains.",findLocations(files,["cors("]))
+    addSecurityIssue(issues,text.includes("eval("),"Critical","Dangerous eval usage detected","Remove eval and use safe parsers or explicit execution boundaries.",findLocations(files,["eval("]))
+    addSecurityIssue(issues,detectExposedSecrets(files).length > 0,"Critical","Possible exposed secrets detected","Move secrets to environment variables and rotate exposed credentials.",detectExposedSecrets(files))
 
     const penalty = issues.reduce((sum,item) => {
         if(item.severity === "Critical") return sum + 22
@@ -386,19 +572,132 @@ function analyzeSecurity(files,auth) {
             passwordHashing : text.includes("bcrypt"),
             inputValidation : text.toLowerCase().includes("validate") || text.includes("zod") || text.includes("joi"),
             uploadSecurity : !text.includes("multer") || (text.includes("limits") && text.includes("fileFilter")),
-            corsConfiguration : text.includes("cors(") && !text.includes("*")
+            corsConfiguration : text.includes("cors(") && !text.includes("*"),
+            exposedSecrets : detectExposedSecrets(files).length === 0
         }
     }
 }
 
-function addSecurityIssue(issues,condition,severity,title,recommendation) {
+function addSecurityIssue(issues,condition,severity,title,recommendation,evidence) {
     if(condition) {
         issues.push({
             severity,
             title,
-            recommendation
+            recommendation,
+            evidence : evidence || []
         })
     }
+}
+
+function detectExposedSecrets(files) {
+    const secretRegex = /(api[_-]?key|jwt_secret|mongo_uri|password|secret)\s*[:=]\s*["'`][^"'`]{12,}/i
+    const matches = []
+
+    files.forEach(file => {
+        file.content.split("\n").forEach((line,index) => {
+            if(secretRegex.test(line) && !file.path.endsWith(".env.example")) {
+                matches.push(createSourceRef(file,index + 1,line.replace(/(["'`]).{8,}\1/,"$1***$1")))
+            }
+        })
+    })
+
+    return matches.slice(0,20)
+}
+
+function analyzeCodeQuality(files,apis,services) {
+    const issues = []
+    const packageData = getPackageData(files)
+    const sourceText = files.map(file => file.content).join("\n")
+
+    files.forEach(file => {
+        const lineCount = file.content.split("\n").length
+        if(lineCount > 350) {
+            issues.push({
+                severity : "Medium",
+                title : "Large file detected",
+                recommendation : "Split this file into smaller modules with clearer ownership.",
+                evidence : [createSourceRef(file,1,`${lineCount} lines`)]
+            })
+        }
+    })
+
+    if(apis.length > 5 && !services.length) {
+        issues.push({
+            severity : "Medium",
+            title : "Missing service layer",
+            recommendation : "Move reusable business logic from controllers into services/helpers.",
+            evidence : apis.slice(0,5).map(api => api.source)
+        })
+    }
+
+    detectDuplicatePatterns(files).forEach(item => issues.push(item))
+
+    Object.keys({...packageData.dependencies,...packageData.devDependencies}).forEach(dep => {
+        if(!sourceText.includes(dep) && !["typescript","tailwindcss","vite"].includes(dep)) {
+            issues.push({
+                severity : "Low",
+                title : `Possibly unused dependency: ${dep}`,
+                recommendation : "Confirm whether this package is still needed and remove it if unused.",
+                evidence : packageData.source ? [packageData.source] : []
+            })
+        }
+    })
+
+    if(sourceText.includes("catch") && !sourceText.includes("next(") && !sourceText.includes("throw")) {
+        issues.push({
+            severity : "Low",
+            title : "Weak error handling pattern",
+            recommendation : "Standardize error handling and preserve useful error context.",
+            evidence : findLocations(files,["catch"])
+        })
+    }
+
+    detectExposedSecrets(files).forEach(secret => {
+        issues.push({
+            severity : "Critical",
+            title : "Hardcoded secret pattern",
+            recommendation : "Move this value to environment configuration and rotate it.",
+            evidence : [secret]
+        })
+    })
+
+    if(!sourceText.toLowerCase().includes("validate") && !sourceText.includes("zod") && !sourceText.includes("joi")) {
+        issues.push({
+            severity : "Medium",
+            title : "Missing validation layer",
+            recommendation : "Add schema validation for request payloads and uploaded files.",
+            evidence : findLocations(files,["req.body"])
+        })
+    }
+
+    return {
+        score : Math.max(100 - issues.reduce((sum,item) => sum + (item.severity === "Critical" ? 18 : item.severity === "High" ? 12 : item.severity === "Medium" ? 7 : 3),0),0),
+        issues,
+        summary : `${issues.length} code quality findings detected across maintainability, validation, dependency hygiene, error handling, and secret safety.`
+    }
+}
+
+function detectDuplicatePatterns(files) {
+    const seen = {}
+    const issues = []
+
+    files.forEach(file => {
+        file.content.split("\n").map(line => line.trim()).filter(line => line.length > 45).forEach((line,index) => {
+            seen[line] = seen[line] || []
+            seen[line].push(createSourceRef(file,index + 1,line))
+        })
+    })
+
+    Object.keys(seen).filter(line => seen[line].length >= 3).slice(0,5).forEach(line => {
+        issues.push({
+            severity : "Low",
+            title : "Duplicate code pattern detected",
+            recommendation : "Extract the repeated pattern into a helper or shared module if the duplication is intentional.",
+            evidence : seen[line].slice(0,3)
+        })
+    })
+
+    return issues
 }
 
 function createArchitecture(techStack,database,apis) {
@@ -508,6 +807,53 @@ function createProjectExplanations(data) {
     }
 }
 
+function createRepositoryWalkthrough(data) {
+    return {
+        title : "Explain Entire Project",
+        explanation : `Project purpose: ${data.title} is best understood as a ${data.techStack.join(", ")} repository with ${data.apis.length} detected APIs and ${data.database.models.length + data.database.prismaModels.length} database models.
+
+Architecture: The application is split into frontend, backend, authentication, database, services/helpers, and deployment concerns. The main system flow is Client -> Routes -> Middleware -> Controllers -> Services -> Database or external APIs.
+
+Frontend flow: Frontend screens or components call backend APIs and display the resulting application state. Relevant frontend folders include ${(data.folderStructure.components || []).slice(0,4).join(", ") || "components not clearly detected"}.
+
+Backend flow: Routes receive requests, middleware protects or transforms them, controllers coordinate validation/business logic, services handle deeper operations, and models persist data.
+
+Authentication: Authentication is ${data.authentication.type}. JWT generation, verification, cookies, protected routes, and logout/token invalidation are documented with source references in the Authentication tab.
+
+Database: The database layer includes ${data.database.models.map(model => model.name).join(", ") || "no detected models"}. Relationships are based on ObjectId/Prisma references.
+
+Key APIs: ${data.apis.slice(0,5).map(api => `${api.method} ${api.path}`).join(", ") || "No API routes were detected"}.
+
+AI integration: ${data.services.some(service => service.externalCalls.includes("Gemini AI")) ? "Gemini AI integration is detected in the service layer." : "No Gemini service integration was detected in source files."}
+
+Deployment: ${data.qualitySignals.hasDocker ? "Docker/deployment files were detected." : "Docker/deployment files were not clearly detected."}
+
+Security choices: Security score is ${data.security.score}/100. Main improvements are ${data.security.issues.slice(0,3).map(issue => issue.title).join(", ") || "not currently flagged"}.
+
+Improvements: Prioritize stronger validation, clearer service boundaries, rate limiting, secure upload filters, and test coverage where missing.`,
+        evidence : [
+            ...(data.apis[0]?.citations || []),
+            ...(data.authentication.jwtGeneration || []).slice(0,2),
+            ...(data.database.models || []).slice(0,2).map(model => model.source)
+        ].filter(Boolean)
+    }
+}
+
+function createResumeKit(data) {
+    const stack = data.techStack.slice(0,5).join(", ") || "modern web technologies"
+
+    return {
+        resumeBullets : [
+            `Built and documented a repository intelligence platform using ${stack}, generating architecture, API, database, authentication, and security reports from source code.`,
+            `Implemented source-grounded analysis with route flow tracing across routes, middleware, controllers, services, models, and external APIs.`,
+            `Created developer-facing report exports including README, markdown, architecture diagrams, PDF summaries, and interview preparation content.`
+        ],
+        linkedInDescription : `${data.title} is a repository intelligence project that turns source code into architecture documentation, API references, security findings, database maps, README content, and interview-ready explanations.`,
+        githubReadme : data.readme,
+        twoMinutePitch : `I built ${data.title} to help developers and recruiters understand a codebase quickly. It analyzes repository structure, detects the stack, traces APIs from route to middleware to controller to service and database, explains authentication and database design, scores security based on real implementation checks, and generates a README plus interview material. The biggest engineering challenge is making the output trustworthy, so every important finding includes source evidence with file paths and line numbers.`
+    }
+}
+
 function buildReadme(data) {
     return `# ${data.title}
 
@@ -614,6 +960,7 @@ function analyzeRepository(files,name,repositoryUrl) {
     const security = analyzeSecurity(files,authentication)
     const architecture = createArchitecture(techStack,database,apis)
     const dependencyGraph = buildDependencyGraph(apis,services,database)
+    const codeQuality = analyzeCodeQuality(files,apis,services)
     const interviewQuestions = generateInterviewQuestions(techStack,authentication,database,apis)
     const title = name || repositoryUrl || "Uploaded Repository"
     const overview = `${title} contains ${files.length} analyzed source files. CodeAtlas detected ${techStack.length} stack items, ${apis.length} API endpoints, ${controllers.length} controller files, ${services.length} service files, and ${database.models.length + database.prismaModels.length} data models.`
@@ -629,6 +976,7 @@ function analyzeRepository(files,name,repositoryUrl) {
         middleware,
         services,
         dependencyGraph,
+        codeQuality,
         techStack,
         authentication,
         database,
@@ -638,6 +986,8 @@ function analyzeRepository(files,name,repositoryUrl) {
         readme : "",
         interviewQuestions,
         projectExplanations : {},
+        repositoryWalkthrough : {},
+        resumeKit : {},
         qualitySignals : {
             hasTests : files.some(file => file.path.includes("test") || file.path.includes("spec")),
             hasDocker : files.some(file => file.path.toLowerCase().includes("dockerfile") || file.path.includes("docker-compose")),
@@ -648,6 +998,8 @@ function analyzeRepository(files,name,repositoryUrl) {
 
     report.projectExplanations = createProjectExplanations(report)
     report.readme = buildReadme(report)
+    report.repositoryWalkthrough = createRepositoryWalkthrough(report)
+    report.resumeKit = createResumeKit(report)
     report.markdown = buildMarkdownReport(report)
 
     return report
@@ -656,4 +1008,3 @@ function analyzeRepository(files,name,repositoryUrl) {
 module.exports = {
     analyzeRepository
 }
-
