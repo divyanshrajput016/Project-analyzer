@@ -1,27 +1,41 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import "./styles.css";
-
-function App() {
-  return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <section className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-6">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">CodeAtlas</p>
-        <h1 className="mt-4 max-w-3xl text-5xl font-bold leading-tight">
-          Repository intelligence for teams that need to understand code quickly.
-        </h1>
-        <p className="mt-5 max-w-2xl text-lg text-slate-300">
-          Analyze GitHub URLs or ZIP projects, generate architecture docs, API references,
-          security reviews, interview prep, and persistent AI reports.
-        </p>
-      </section>
-    </main>
-  );
-}
+import { AuthProvider } from "./context/AuthContext";
+import { Layout } from "./components/Layout";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { LandingPage } from "./pages/LandingPage";
+import { LoginPage, RegisterPage } from "./pages/AuthPages";
+import { DashboardPage } from "./pages/DashboardPage";
+import { UploadPage } from "./pages/UploadPage";
+import { ReportsPage } from "./pages/ReportsPage";
+import { ReportViewerPage } from "./pages/ReportViewerPage";
+import { ChatPage } from "./pages/ChatPage";
+import { ProfilePage } from "./pages/ProfilePage";
+import { AdminPage } from "./pages/AdminPage";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route element={<ProtectedRoute />}>
+            <Route element={<Layout />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/upload" element={<UploadPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/reports/:id" element={<ReportViewerPage />} />
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/admin" element={<AdminPage />} />
+            </Route>
+          </Route>
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   </React.StrictMode>
 );
-
