@@ -1,0 +1,22 @@
+services:
+  server:
+    build: ./server
+    container_name: codeatlas-server
+    env_file:
+      - ./server/.env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./server/uploads:/app/uploads
+      - ./server/temp:/app/temp
+
+  client:
+    build: ./client
+    container_name: codeatlas-client
+    environment:
+      - VITE_API_URL=http://localhost:3000/api
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+
