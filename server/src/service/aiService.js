@@ -36,7 +36,7 @@ async function answerRepositoryQuestion(question,report) {
         const ai = new GoogleGenAI({apiKey : process.env.GOOGLE_API_KEY})
         const response = await ai.models.generateContent({
             model : "gemini-2.5-pro",
-            contents : `Answer only from this repository report. If the answer is not in context, say that the report does not contain enough context.\n\nQuestion: ${question}\n\nReport:\n${JSON.stringify(report,null,2)}`
+            contents : `Answer only from this repository report. If the answer is not in context, say that the report does not contain enough context. Use markdown. When you reference routes, controllers, models, middleware, or services, include a short "Sources" section with file paths from the report.\n\nQuestion: ${question}\n\nReport:\n${JSON.stringify(report,null,2)}`
         })
 
         return response.text
@@ -50,4 +50,3 @@ module.exports = {
     generateAIReport,
     answerRepositoryQuestion
 }
-

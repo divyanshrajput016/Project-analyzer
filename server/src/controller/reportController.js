@@ -1,4 +1,5 @@
 const reportModel = require("../models/analysisReport")
+const PDFDocument = require("pdfkit")
 
 async function getAllReports(req,res) {
     try {
@@ -115,9 +116,43 @@ async function exportPdf(req,res) {
         })
     }
 
-    res.setHeader("Content-Type","text/plain")
-    res.setHeader("Content-Disposition",`attachment; filename="${report.title || "codeatlas-report"}.pdf.txt"`)
-    res.send(report.markdown || report.readme || "# CodeAtlas Report")
+    res.setHeader("Content-Type","application/pdf")
+    res.setHeader("Content-Disposition",`attachment; filename="${report.title || "codeatlas-report"}.pdf"`)
+
+    const doc = new PDFDocument({margin : 48})
+    doc.pipe(res)
+
+    doc.fontSize(22).text(report.title || "CodeAtlas Report")
+    doc.moveDown()
+    doc.fontSize(11).fillColor("#444").text(report.summary || "")
+    doc.moveDown()
+
+    doc.fillColor("#111").fontSize(16).text("Security Score")
+    doc.fontSize(28).text(`${report.security?.score || 0}/100`)
+    doc.moveDown()
+
+    doc.fontSize(16).text("Tech Stack")
+    doc.fontSize(11).text((report.techStack || []).join(", ") || "Not detected")
+    doc.moveDown()
+
+    doc.fontSize(16).text("APIs")
+    ;(report.apis || []).slice(0,20).forEach(api => {
+        doc.fontSize(10).text(`${api.method} ${api.path} -> ${api.controller || "controller"}`)
+    })
+    doc.moveDown()
+
+    doc.fontSize(16).text("Security Issues")
+    ;(report.security?.issues || []).slice(0,20).forEach(issue => {
+        doc.fontSize(10).text(`${issue.severity}: ${issue.title}`)
+        doc.fontSize(9).fillColor("#555").text(issue.recommendation)
+        doc.fillColor("#111")
+    })
+    doc.moveDown()
+
+    doc.fontSize(16).text("Generated README")
+    doc.fontSize(9).text((report.readme || report.markdown || "").slice(0,5000))
+
+    doc.end()
 }
 
 module.exports = {

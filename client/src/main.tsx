@@ -14,6 +14,7 @@ import { ReportViewerPage } from "./pages/ReportViewerPage";
 import { ChatPage } from "./pages/ChatPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { AdminPage } from "./pages/AdminPage";
+import { InterviewPage } from "./pages/InterviewPage";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -30,6 +31,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/reports/:id" element={<ReportViewerPage />} />
               <Route path="/chat" element={<ChatPage />} />
+              <Route path="/interview" element={<InterviewPage />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/admin" element={<AdminPage />} />
             </Route>

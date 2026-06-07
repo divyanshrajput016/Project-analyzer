@@ -5,6 +5,17 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom", "react-router-dom"],
+          charts: ["recharts"],
+          mermaid: ["mermaid"],
+          markdown: ["react-markdown", "remark-gfm"]
+        }
+      }
+    }
   }
 });
-
