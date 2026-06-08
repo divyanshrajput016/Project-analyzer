@@ -2,6 +2,7 @@ const fs = require("fs")
 const path = require("path")
 const os = require("os")
 const AdmZip = require("adm-zip")
+const axios = require("axios")
 const simpleGit = require("simple-git")
 const {randomUUID} = require("crypto")
 
@@ -22,9 +23,63 @@ function shouldIgnore(filePath) {
 }
 
 async function cloneRepository(repositoryUrl) {
+    const githubRepo = parseGithubRepository(repositoryUrl)
+
+    if(githubRepo) {
+        return downloadGithubRepository(githubRepo)
+    }
+
     const workDir = createWorkDir()
     await simpleGit().clone(repositoryUrl,workDir,["--depth","1"])
     return workDir
+}
+
+function parseGithubRepository(repositoryUrl) {
+    try {
+        const url = new URL(repositoryUrl)
+
+        if(url.hostname !== "github.com") {
+            return null
+        }
+
+        const [owner,repoWithSuffix] = url.pathname.split("/").filter(Boolean)
+
+        if(!owner || !repoWithSuffix) {
+            return null
+        }
+
+        return {
+            owner,
+            repo : repoWithSuffix.replace(/\.git$/,"")
+        }
+    } catch(error) {
+        return null
+    }
+}
+
+async function downloadGithubRepository({owner,repo}) {
+    const workDir = createWorkDir()
+
+    try {
+        const repoResponse = await axios.get(`https://api.github.com/repos/${owner}/${repo}`,{
+            headers : {
+                Accept : "application/vnd.github+json"
+            }
+        })
+        const defaultBranch = repoResponse.data.default_branch || "main"
+        const zipResponse = await axios.get(`https://api.github.com/repos/${owner}/${repo}/zipball/${defaultBranch}`,{
+            responseType : "arraybuffer",
+            headers : {
+                Accept : "application/vnd.github+json"
+            }
+        })
+        const zip = new AdmZip(Buffer.from(zipResponse.data))
+        zip.extractAllTo(workDir,true)
+        return workDir
+    } catch(error) {
+        cleanupWorkDir(workDir)
+        throw error
+    }
 }
 
 async function extractZip(buffer) {
@@ -89,4 +144,3 @@ module.exports = {
     readProjectFiles,
     cleanupWorkDir
 }
-

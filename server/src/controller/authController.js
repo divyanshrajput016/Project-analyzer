@@ -19,10 +19,12 @@ function createToken(user) {
 }
 
 function setTokenCookie(res,token) {
+    const isProduction = process.env.NODE_ENV === "production"
+
     res.cookie("token",token,{
         httpOnly : true,
-        sameSite : "lax",
-        secure : process.env.NODE_ENV === "production",
+        sameSite : isProduction ? "none" : "lax",
+        secure : isProduction,
         maxAge : 24 * 60 * 60 * 1000
     });
 }
@@ -120,7 +122,11 @@ async function logoutUser(req,res) {
         await blacklistModel.create({token})
     }
 
-    res.clearCookie("token")
+    res.clearCookie("token",{
+        httpOnly : true,
+        sameSite : process.env.NODE_ENV === "production" ? "none" : "lax",
+        secure : process.env.NODE_ENV === "production"
+    })
 
     return res.status(200).json({
         message : "User logged out successfully"
@@ -155,4 +161,3 @@ module.exports = {
     logoutUser,
     getMe
 }
-
